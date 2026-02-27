@@ -1,4 +1,4 @@
-name: Go
+name: Go (linux static reproducible)
 
 on:
   push:
@@ -9,36 +9,59 @@ on:
     branches: [ main ]
     paths-ignore:
       - 'www/**'
+  workflow_dispatch: {}
 
 jobs:
-  build:
+  build-linux:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
           go-version: "1.24"
 
+      - name: Compute SOURCE_DATE_EPOCH
+        shell: bash
+        run: |
+          echo "SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)" >> "$GITHUB_ENV"
+
       - name: Test
         run: go test -v ./...
 
       - name: Build static linux binary
+        shell: bash
+        env:
+          TZ: UTC
         run: |
           mkdir -p dist
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-          go build -trimpath -ldflags="-s -w" \
-          -o dist/process-compose-linux-amd64 ./
+          SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}" \
+          go build \
+            -trimpath \
+            -buildvcs=false \
+            -ldflags="-s -w -buildid=" \
+            -o dist/process-compose-linux-amd64 ./
 
       - name: Verify static
+        shell: bash
         run: |
           file dist/process-compose-linux-amd64
           ldd dist/process-compose-linux-amd64 || true
+
+      - name: Create SHA256 checksum
+        shell: bash
+        run: |
+          sha256sum dist/process-compose-linux-amd64 > dist/process-compose-linux-amd64.sha256
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: process-compose-linux-amd64
-          path: dist/process-compose-linux-amd64
+          path: |
+            dist/process-compose-linux-amd64
+            dist/process-compose-linux-amd64.sha256
